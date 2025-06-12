@@ -4,7 +4,7 @@ import * as path from 'path';
 
 export function activate(context: vscode.ExtensionContext) {
   const xmindLinkProvider: vscode.DocumentLinkProvider = {
-    provideDocumentLinks(document: vscode.TextDocument, _token: vscode.CancellationToken) {
+    provideDocumentLinks(document: vscode.TextDocument): vscode.DocumentLink[] {
       const links: vscode.DocumentLink[] = [];
       const regex = /\[.*?\]\((.*?\.xmind)\)/g;
 
@@ -15,49 +15,36 @@ export function activate(context: vscode.ExtensionContext) {
           const linkPath = match[1];
           const start = match.index + match[0].indexOf(linkPath);
           const end = start + linkPath.length;
-
           const range = new vscode.Range(line, start, line, end);
-          const docLink = new vscode.DocumentLink(range);
 
-          // target を設定しないことで resolveDocumentLink を使う
-          docLink.tooltip = `XMindで開く: ${linkPath}`;
+          const fullPath = path.resolve(path.dirname(document.uri.fsPath), linkPath);
+          const encoded = encodeURIComponent(JSON.stringify(fullPath));
+          const commandUri = vscode.Uri.parse(`command:OpenXmindLink.fromLink?${encoded}`);
+
+          const docLink = new vscode.DocumentLink(range, commandUri);
+          docLink.tooltip = 'XMind で開く';
           links.push(docLink);
         }
       }
 
       return links;
-    },
-
-    async resolveDocumentLink(link: vscode.DocumentLink) {
-      const document = vscode.window.activeTextEditor?.document;
-      if (!document) {return;}
-
-      const lineText = document.lineAt(link.range.start.line).text;
-      const match = /\[.*?\]\((.*?\.xmind)\)/.exec(lineText);
-      if (!match) {return;}
-
-      const rawPath = match[1];
-      const basePath = path.dirname(document.uri.fsPath);
-      const fullPath = path.resolve(basePath, rawPath);
-
-      const platform = process.platform;
-      const cmd = platform === 'win32'
-        ? `start "" "${fullPath}"`
-        : platform === 'darwin'
-        ? `open "${fullPath}"`
-        : `xdg-open "${fullPath}"`;
-
-      cp.exec(cmd, err => {
-        if (err) {
-          vscode.window.showErrorMessage(`XMind の起動に失敗しました: ${err.message}`);
-        }
-      });
-
-      // VSCode にファイルを開かせないように target を設定しない
-      link.target = undefined;
-      return link;
     }
   };
+  
+  vscode.commands.registerCommand('OpenXmindLink.fromLink', (filePath: string) => {
+    const platform = process.platform;
+    const cmd = platform === 'win32'
+      ? `start "" "${filePath}"`
+      : platform === 'darwin'
+      ? `open "${filePath}"`
+      : `xdg-open "${filePath}"`;
+
+    cp.exec(cmd, err => {
+      if (err) {
+        vscode.window.showErrorMessage(`XMind を開けませんでした: ${err.message}`);
+      }
+    });
+  });
 
   context.subscriptions.push(
     vscode.languages.registerDocumentLinkProvider({ language: 'markdown' }, xmindLinkProvider)
